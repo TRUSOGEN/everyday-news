@@ -80,7 +80,8 @@ function buildTool(cfg: AiConfig): Anthropic.Tool {
                   required: ["text", "source", "articleIndex", "perspective"],
                   additionalProperties: false,
                 },
-                maxItems: cfg.maxBulletsPerCategory,
+                // maxItems not supported in strict mode — cap enforced by
+                // the prompt and the .slice() below
               },
             },
             required: ["category", "bullets"],
