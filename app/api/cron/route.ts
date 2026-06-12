@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "所有来源抓取失败", details: errors }, { status: 500 });
   }
 
-  const { overview, categories } = await generateDigest(articles);
+  const { overview, categories } = await generateDigest(articles, config.ai);
   const now = new Date();
 
   const digest: DailyDigest = {

@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { getConfig } from "@/lib/storage";
+import { dailyGenerateToken } from "@/lib/auth";
 import ConfigEditor from "./ConfigEditor";
 
 export const dynamic = "force-dynamic";
 
 export default async function ConfigPage() {
   const config = await getConfig();
-  const cronSecret = process.env.CRON_SECRET ?? "";
+  const genToken = dailyGenerateToken();
 
   return (
     <div className="min-h-screen" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
@@ -43,7 +44,7 @@ export default async function ConfigPage() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-10 animate-fade-in-up" style={{ animationDelay: "80ms" }}>
-        <ConfigEditor initialConfig={config} cronSecret={cronSecret} />
+        <ConfigEditor initialConfig={config} genToken={genToken} />
       </main>
     </div>
   );

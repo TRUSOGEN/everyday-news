@@ -1,7 +1,13 @@
 import Parser from "rss-parser";
 import type { NewsSource, NewsArticle } from "@/types";
 
-const parser = new Parser({ timeout: 12000, headers: { "User-Agent": "EverydayNews/1.0" } });
+const parser = new Parser({ timeout: 8000, headers: { "User-Agent": "EverydayNews/1.0" } });
+
+// RSS descriptions can be entire article bodies — cap them so the AI input
+// stays small enough to summarize within the time budget
+function clip(text: string, max = 200): string {
+  return text.length > max ? text.slice(0, max) + "…" : text;
+}
 
 function isValidUrl(url: string): boolean {
   try {
@@ -20,7 +26,7 @@ async function fetchSource(source: NewsSource): Promise<NewsArticle[]> {
   return (feed.items ?? []).slice(0, 12).map((item) => ({
     title:       item.title?.trim() ?? "",
     link:        item.link ?? "",
-    description: item.contentSnippet?.trim() ?? item.summary?.trim() ?? "",
+    description: clip(item.contentSnippet?.trim() ?? item.summary?.trim() ?? ""),
     pubDate:     item.pubDate ?? new Date().toISOString(),
     source:      source.name,
     category:    source.category,

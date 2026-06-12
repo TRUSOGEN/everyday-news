@@ -14,12 +14,24 @@ const OVERVIEW_GUIDE: Record<string, string> = {
   detailed: "今日概览5-6句话，全面分析当日重要事件及趋势",
 };
 
+const LANGUAGE_GUIDE: Record<string, string> = {
+  zh:        "全部使用简体中文输出",
+  en:        "Write all output in English",
+  bilingual: "每条要点先写中文，再附一句英文简译",
+};
+
+const FORMAT_GUIDE: Record<string, string> = {
+  bullets:    "要点式表达，信息密度高，直接陈述事实",
+  executive:  "执行摘要风格：开门见山，突出对决策有用的信息",
+  paragraphs: "叙述性语句，行文连贯自然",
+};
+
 function buildSystemPrompt(cfg: AiConfig): string {
   const lengthGuide = SUMMARY_LENGTH_GUIDE[cfg.summaryLength] ?? SUMMARY_LENGTH_GUIDE.standard;
   const overviewGuide = OVERVIEW_GUIDE[cfg.summaryLength] ?? OVERVIEW_GUIDE.standard;
   const perspectiveGuide = cfg.showPerspective
-    ? `5. 每条要点的 perspective 字段：1-2句（50-80字），对该新闻的意义或影响作出主观判断`
-    : '5. perspective 字段填写空字符串';
+    ? `6. 每条要点的 perspective 字段：1-2句（50-80字），对该新闻的意义或影响作出主观判断`
+    : '6. perspective 字段填写空字符串';
 
   return `你是一位资深财经科技新闻编辑。
 
@@ -27,9 +39,10 @@ function buildSystemPrompt(cfg: AiConfig): string {
 1. 只基于用户提供的文章内容提炼，不添加原文没有的信息
 2. ${lengthGuide}
 3. ${overviewGuide}，语言流畅，有全局视野
-4. 必须为每篇文章生成一条 bullet，articleIndex 使用原始列表中的数字索引
+4. 每个分类挑选最重要的新闻（每分类最多 ${cfg.maxBulletsPerCategory} 条），articleIndex 必须使用该分类列表中标注的数字索引
+5. ${LANGUAGE_GUIDE[cfg.language] ?? LANGUAGE_GUIDE.zh}；${FORMAT_GUIDE[cfg.format] ?? FORMAT_GUIDE.bullets}
 ${perspectiveGuide}
-6. categories 字段必须是 JSON 数组，每个元素含 category 和 bullets
+7. categories 字段必须是 JSON 数组，每个元素含 category 和 bullets
 
 请调用 submit_digest 函数提交结果。`;
 }
@@ -110,15 +123,19 @@ function extractPartialOverview(json: string): string {
   pos++; // skip opening quote
   let result = "";
   while (pos < json.length) {
-    if (json[pos] === "\\" && pos + 1 < json.length) {
+    if (json[pos] === "\\") {
+      if (pos + 1 >= json.length) break; // partial escape at buffer end — wait for more
       const esc = json[pos + 1];
-      if (esc === '"') result += '"';
-      else if (esc === "n") result += "\n";
-      else if (esc === "t") result += "\t";
-      else if (esc === "r") result += "\r";
-      else if (esc === "\\") result += "\\";
-      else result += esc;
-      pos += 2;
+      if (esc === '"') { result += '"'; pos += 2; }
+      else if (esc === "n") { result += "\n"; pos += 2; }
+      else if (esc === "t") { result += "\t"; pos += 2; }
+      else if (esc === "r") { result += "\r"; pos += 2; }
+      else if (esc === "\\") { result += "\\"; pos += 2; }
+      else if (esc === "u") {
+        if (pos + 6 > json.length) break; // partial \uXXXX — wait for more
+        result += String.fromCharCode(parseInt(json.slice(pos + 2, pos + 6), 16));
+        pos += 6;
+      } else { result += esc; pos += 2; }
     } else if (json[pos] === '"') {
       break;
     } else {
@@ -139,10 +156,15 @@ export async function generateDigest(
   // Create client inside function so env vars are guaranteed resolved
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  // Group by category
+  // Group by category, capping input per category — sending every fetched
+  // article slows generation and exceeds the output token budget
+  const capPerCat = Math.max(cfg.maxBulletsPerCategory * 2, 8);
   const grouped: Record<string, NewsArticle[]> = {};
   for (const a of articles) {
     (grouped[a.category] ??= []).push(a);
+  }
+  for (const cat of Object.keys(grouped)) {
+    grouped[cat] = grouped[cat].slice(0, capPerCat);
   }
 
   const inputText = Object.entries(grouped)
@@ -158,14 +180,24 @@ export async function generateDigest(
   const tool = buildTool(cfg);
   const model = cfg.model ?? "claude-haiku-4-5";
 
-  console.log("[summarizer:A] model:", model, "articles:", articles.length,
-              "inputLen:", inputText.length);
+  // Expected output size drives both max_tokens and the progress estimate
+  const expectedBullets = Object.values(grouped).reduce(
+    (n, arr) => n + Math.min(arr.length, cfg.maxBulletsPerCategory), 0);
+  const perBulletTokens =
+    cfg.summaryLength === "brief" ? 120 : cfg.summaryLength === "detailed" ? 400 : 260;
+  const maxTokens = Math.min(8192, 600 + expectedBullets * perBulletTokens);
+  const expectedChars = 400 + expectedBullets *
+    (cfg.summaryLength === "brief" ? 200 : cfg.summaryLength === "detailed" ? 620 : 420);
 
-  onProgress?.({ type: "step", text: `AI 开始分析 ${articles.length} 篇文章（模型：${model}）…` });
+  const inputCount = Object.values(grouped).reduce((n, arr) => n + arr.length, 0);
+  console.log("[summarizer:A] model:", model, "articles:", inputCount,
+              "inputLen:", inputText.length, "maxTokens:", maxTokens);
+
+  onProgress?.({ type: "step", text: `AI 开始分析 ${inputCount} 篇文章（模型：${model}）…` });
 
   const stream = anthropic.messages.stream({
     model,
-    max_tokens: 4096,
+    max_tokens: maxTokens,
     tools: [tool],
     tool_choice: { type: "tool", name: "submit_digest" },
     system: systemPrompt,
@@ -174,6 +206,7 @@ export async function generateDigest(
 
   let accJson = "";
   let lastOverviewLen = 0;
+  let lastPct = 30;
 
   for await (const event of stream) {
     if (
@@ -186,6 +219,12 @@ export async function generateDigest(
         if (overviewText.length > lastOverviewLen) {
           onProgress({ type: "overview_delta", text: overviewText.slice(lastOverviewLen) });
           lastOverviewLen = overviewText.length;
+        }
+        // Map accumulated JSON length onto the 30–90% range of the progress bar
+        const pct = 30 + Math.min(60, Math.round((accJson.length / expectedChars) * 60));
+        if (pct >= lastPct + 2) {
+          onProgress({ type: "progress", value: pct });
+          lastPct = pct;
         }
       }
     }

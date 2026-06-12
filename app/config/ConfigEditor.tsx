@@ -13,6 +13,12 @@ interface LogEntry {
   isError?: boolean;
 }
 
+interface ArticleLink {
+  title: string;
+  link: string;
+  source: string;
+}
+
 function genId() {
   return Math.random().toString(36).slice(2, 9);
 }
@@ -103,18 +109,20 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 interface Props {
   initialConfig: AppConfig;
-  cronSecret: string;
+  genToken: string;
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
 
-export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
+export default function ConfigEditor({ initialConfig, genToken }: Props) {
   const [config, setConfig] = useState<AppConfig>(initialConfig);
   const [activeTab, setActiveTab] = useState<Tab>("sources");
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [overviewText, setOverviewText] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [articleLinks, setArticleLinks] = useState<ArticleLink[]>([]);
   const logIdRef = useRef(0);
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -186,6 +194,8 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
     setLogs([]);
     setOverviewText("");
     setMessage("");
+    setProgress(0);
+    setArticleLinks([]);
     try {
       addLog("正在保存配置…");
       const saveRes = await fetch("/api/config", {
@@ -198,7 +208,7 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
 
       const genRes = await fetch("/api/generate", {
         method: "POST",
-        headers: { Authorization: `Bearer ${cronSecret}` },
+        headers: { Authorization: `Bearer ${genToken}` },
       });
 
       if (!genRes.ok) {
@@ -210,6 +220,7 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
       const reader = genRes.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
+      let finished = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -224,15 +235,26 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
 
           if (ev.type === "step") {
             addLog(String(ev.text), { isWarning: Boolean(ev.isWarning) });
+          } else if (ev.type === "progress") {
+            setProgress(Number(ev.value));
+          } else if (ev.type === "articles") {
+            setArticleLinks(ev.items as ArticleLink[]);
           } else if (ev.type === "overview_delta") {
             setOverviewText((prev) => prev + String(ev.text));
           } else if (ev.type === "done") {
+            finished = true;
+            setProgress(100);
             setStatus("done");
             setMessage(`共处理 ${ev.articleCount} 篇文章`);
           } else if (ev.type === "error") {
             throw new Error(String(ev.message));
           }
         }
+      }
+
+      // Stream ended without a done/error event — most likely a function timeout
+      if (!finished) {
+        throw new Error("连接中断（可能是生成超时）。请稍后重试，或打开报告页确认是否已生成。");
       }
     } catch (e) {
       setStatus("error");
@@ -249,11 +271,19 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
           <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-stone-100 bg-stone-50">
             <span className="w-3 h-3 border-2 border-stone-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
             <span className="text-sm font-semibold text-stone-700">正在生成报告…</span>
-            <span className="ml-auto text-xs text-stone-400">预计 30–60 秒</span>
+            <span className="ml-auto text-xs font-mono font-semibold text-stone-500">{progress}%</span>
+          </div>
+
+          {/* Progress bar */}
+          <div className="h-1.5 bg-stone-100">
+            <div
+              className="h-full accent-gradient transition-all duration-500 ease-out"
+              style={{ width: `${progress}%` }}
+            />
           </div>
 
           {/* Log lines */}
-          <div className="px-5 py-4 space-y-2 max-h-64 overflow-y-auto font-mono text-[13px]">
+          <div className="px-5 py-4 space-y-2 max-h-72 overflow-y-auto font-mono text-[13px]">
             {logs.map((log) => (
               <div
                 key={log.id}
@@ -267,6 +297,29 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
                 <span className="leading-snug">{log.text}</span>
               </div>
             ))}
+
+            {/* Fetched articles with clickable original links */}
+            {articleLinks.length > 0 && (
+              <details className="mt-2 font-sans group">
+                <summary className="text-xs text-stone-400 cursor-pointer hover:text-stone-600 transition-colors select-none">
+                  已抓取的文章（{articleLinks.length} 篇，点击查看原文链接）
+                </summary>
+                <div className="mt-2 space-y-1 pl-1 max-h-40 overflow-y-auto">
+                  {articleLinks.map((a, i) => (
+                    <a
+                      key={i}
+                      href={a.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-xs text-stone-500 hover:text-blue-600 hover:underline truncate transition-colors"
+                    >
+                      <span className="text-stone-300 mr-1">[{a.source}]</span>
+                      {a.title} ↗
+                    </a>
+                  ))}
+                </div>
+              </details>
+            )}
 
             {/* Streaming overview */}
             {overviewText && (
