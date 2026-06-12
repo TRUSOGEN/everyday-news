@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     }
 
     console.log("[generate] 开始调用 Claude");
-    const { overview, categories } = await generateDigest(articles);
+    const { overview, categories } = await generateDigest(articles, config.ai);
     console.log("[generate] Claude 完成");
 
     const now = new Date();

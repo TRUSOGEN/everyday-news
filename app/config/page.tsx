@@ -9,29 +9,40 @@ export default async function ConfigPage() {
   const cronSecret = process.env.CRON_SECRET ?? "";
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+
       {/* Header */}
-      <header className="bg-stone-900 text-stone-100 px-6 py-5 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">工作流配置</h1>
-          <p className="text-stone-400 text-xs mt-0.5">Everyday News · 新闻来源 & 生成设置</p>
+      <header className="relative overflow-hidden bg-gradient-to-br from-stone-950 via-stone-900 to-stone-800 text-stone-100">
+        <div className="absolute inset-0 opacity-[0.03]"
+          style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "24px 24px" }}
+        />
+        <div className="relative max-w-3xl mx-auto px-6 py-8 flex items-center justify-between">
+          <div className="animate-fade-in">
+            <h1
+              className="text-3xl font-bold tracking-tight text-white leading-none"
+              style={{ fontFamily: "var(--font-playfair), Georgia, serif" }}
+            >
+              工作流配置
+            </h1>
+            <p className="text-stone-400 text-sm mt-2">
+              Everyday News · 新闻来源 &amp; AI 生成设置
+            </p>
+          </div>
+          <Link
+            href="/"
+            className="animate-fade-in inline-flex items-center gap-2 text-sm text-stone-300 hover:text-white transition-colors border border-stone-700 hover:border-stone-400 px-4 py-2 rounded-xl"
+            style={{ animationDelay: "100ms" }}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
+            </svg>
+            今日报告
+          </Link>
         </div>
-        <Link
-          href="/"
-          className="text-sm text-stone-300 hover:text-white transition-colors border border-stone-600 px-3 py-1.5 rounded-lg"
-        >
-          查看今日报告 →
-        </Link>
+        <div className="h-[3px] accent-gradient" />
       </header>
 
-      <div className="h-1 bg-gradient-to-r from-amber-400 via-blue-400 to-stone-400" />
-
-      <main className="max-w-2xl mx-auto px-4 py-8">
-        {/* Workflow description */}
-        <p className="text-sm text-stone-500 mb-6">
-          点击每个节点查看和编辑配置，完成后点击"保存并立即生成"即可。
-        </p>
-
+      <main className="max-w-3xl mx-auto px-4 py-10 animate-fade-in-up" style={{ animationDelay: "80ms" }}>
         <ConfigEditor initialConfig={config} cronSecret={cronSecret} />
       </main>
     </div>

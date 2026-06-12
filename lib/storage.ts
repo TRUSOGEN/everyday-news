@@ -10,7 +10,6 @@ function getRedis(): Redis | null {
   const token = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN ?? "";
   if (!url || !token) return null;
   try {
-    // Validate URL before passing to Redis
     new URL(url);
     return new Redis({ url, token });
   } catch {
@@ -22,8 +21,15 @@ function getRedis(): Redis | null {
 export async function getConfig(): Promise<AppConfig> {
   const redis = getRedis();
   if (!redis) return DEFAULT_CONFIG;
-  const stored = await redis.get<AppConfig>(CONFIG_KEY);
-  return stored ?? DEFAULT_CONFIG;
+  const stored = await redis.get<Partial<AppConfig>>(CONFIG_KEY);
+  if (!stored) return DEFAULT_CONFIG;
+  // Deep-merge so old configs without ai/schedule fields still work
+  return {
+    ...DEFAULT_CONFIG,
+    ...stored,
+    ai: { ...DEFAULT_CONFIG.ai, ...(stored.ai ?? {}) },
+    schedule: { ...DEFAULT_CONFIG.schedule, ...(stored.schedule ?? {}) },
+  };
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {

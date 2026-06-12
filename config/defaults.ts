@@ -17,4 +17,15 @@ export const DEFAULT_CONFIG: AppConfig = {
       enabled: true,
     },
   ],
+  ai: {
+    model: "claude-haiku-4-5",
+    summaryLength: "standard",
+    format: "bullets",
+    language: "zh",
+    maxBulletsPerCategory: 5,
+    showPerspective: true,
+  },
+  schedule: {
+    hour: 12,
+  },
 };
