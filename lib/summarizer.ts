@@ -48,9 +48,12 @@ ${perspectiveGuide}
 }
 
 function buildTool(cfg: AiConfig): Anthropic.Tool {
+  // strict: true makes the API enforce this schema — categories can no longer
+  // come back as an object or a JSON string
   return {
     name: "submit_digest",
     description: "提交今日新闻摘要结果",
+    strict: true,
     input_schema: {
       type: "object" as const,
       properties: {
@@ -72,24 +75,36 @@ function buildTool(cfg: AiConfig): Anthropic.Tool {
                     text:         { type: "string" },
                     source:       { type: "string" },
                     articleIndex: { type: "number" },
-                    perspective:  { type: "string" },
+                    perspective:  { type: "string", description: "未启用时填空字符串" },
                   },
-                  required: ["text", "source", "articleIndex"],
+                  required: ["text", "source", "articleIndex", "perspective"],
+                  additionalProperties: false,
                 },
                 maxItems: cfg.maxBulletsPerCategory,
               },
             },
             required: ["category", "bullets"],
+            additionalProperties: false,
           },
         },
       },
       required: ["overview", "categories"],
+      additionalProperties: false,
     },
   };
 }
 
 function toArray<T>(val: unknown): T[] {
   if (Array.isArray(val)) return val as T[];
+  // The model occasionally returns a JSON-stringified array
+  if (typeof val === "string") {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) return parsed as T[];
+      if (parsed && typeof parsed === "object") return Object.values(parsed) as T[];
+    } catch { /* fall through */ }
+    return [];
+  }
   if (val && typeof val === "object") return Object.values(val) as T[];
   return [];
 }
@@ -276,10 +291,17 @@ export async function generateDigest(
       .slice(0, cfg.maxBulletsPerCategory)
       .map((b): BulletPoint => {
         const idx = typeof b?.articleIndex === "number" ? b.articleIndex : 0;
+        // Index lookup first; fall back to same-source article so the
+        // 查看原文 button never disappears
+        const link =
+          catArticles[idx]?.link ||
+          catArticles.find((a) => a.source === b?.source)?.link ||
+          articles.find((a) => a.source === b?.source)?.link ||
+          "";
         return {
           text:        b?.text ?? "",
           source:      b?.source ?? "",
-          link:        catArticles[idx]?.link ?? "",
+          link,
           perspective: b?.perspective || undefined,
         };
       });
@@ -291,6 +313,8 @@ export async function generateDigest(
 
   // An overview-only digest is useless — fail loudly instead of saving it
   if (categories.length === 0 || categories.every((c) => c.bullets.length === 0)) {
+    console.error("[summarizer:D] empty categories, raw input:",
+                  JSON.stringify(toolUse.input).slice(0, 2000));
     throw new Error(
       message.stop_reason === "max_tokens"
         ? "AI 输出被截断导致分类内容丢失，请重试（已自动调大输出上限）"
