@@ -4,6 +4,7 @@ import { DEFAULT_CONFIG } from "@/config/defaults";
 
 const DIGEST_KEY = "digest:latest";
 const CONFIG_KEY = "app:config";
+const DATES_KEY = "digest:dates";
 
 function getRedis(): Redis | null {
   const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL ?? "";
@@ -23,7 +24,6 @@ export async function getConfig(): Promise<AppConfig> {
   if (!redis) return DEFAULT_CONFIG;
   const stored = await redis.get<Partial<AppConfig>>(CONFIG_KEY);
   if (!stored) return DEFAULT_CONFIG;
-  // Deep-merge so old configs without ai/schedule fields still work
   return {
     ...DEFAULT_CONFIG,
     ...stored,
@@ -43,10 +43,27 @@ export async function saveDigest(digest: DailyDigest): Promise<void> {
   if (!redis) throw new Error("Redis 未配置");
   await redis.set(DIGEST_KEY, digest);
   await redis.set(`digest:${digest.date}`, digest, { ex: 60 * 60 * 24 * 30 });
+  // Maintain a deduplicated newest-first list of up to 30 dates
+  await redis.lrem(DATES_KEY, 0, digest.date);
+  await redis.lpush(DATES_KEY, digest.date);
+  await redis.ltrim(DATES_KEY, 0, 29);
 }
 
 export async function getLatestDigest(): Promise<DailyDigest | null> {
   const redis = getRedis();
   if (!redis) return null;
   return redis.get<DailyDigest>(DIGEST_KEY);
+}
+
+export async function getDigestByDate(date: string): Promise<DailyDigest | null> {
+  const redis = getRedis();
+  if (!redis) return null;
+  return redis.get<DailyDigest>(`digest:${date}`);
+}
+
+export async function getDigestDates(): Promise<string[]> {
+  const redis = getRedis();
+  if (!redis) return [];
+  const dates = await redis.lrange(DATES_KEY, 0, 29);
+  return (dates as string[]).filter(Boolean);
 }

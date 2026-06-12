@@ -191,6 +191,42 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
     }
   }
 
+  // ── After generation: go to report ──────────────────────────────────────
+  if (status === "done") {
+    return (
+      <div className="text-center py-12 animate-fade-in-up">
+        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-5">
+          <svg className="w-8 h-8 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h2 className="text-xl font-bold text-stone-800 mb-2"
+            style={{ fontFamily: "var(--font-playfair), Georgia, serif" }}>
+          报告已生成完成
+        </h2>
+        <p className="text-stone-400 text-sm mb-8">{message}</p>
+
+        <a href="/report"
+          className="inline-flex items-center gap-2 bg-stone-900 text-white px-8 py-4 rounded-2xl text-base font-semibold hover:bg-stone-700 transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 mb-4">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+          查看今日报告
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </a>
+
+        <div className="mt-4">
+          <button onClick={() => { setStatus("idle"); setMessage(""); }}
+            className="text-sm text-stone-400 hover:text-stone-600 transition-colors">
+            返回配置 →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const isWorking = status === "saving" || status === "generating";
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -567,38 +603,24 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
         )}
       </div>
 
-      {/* Status message */}
+      {/* Status message (error / in-progress only — "done" is handled by the early return above) */}
       {message && (
         <div
           className={`mb-5 px-5 py-4 rounded-xl text-sm flex items-start gap-3 animate-fade-in ${
             status === "error"
               ? "bg-red-50 text-red-700 border border-red-200"
-              : status === "done"
-              ? "bg-green-50 text-green-700 border border-green-200"
               : "bg-blue-50 text-blue-700 border border-blue-200"
           }`}
         >
           {status === "generating" && (
             <span className="mt-0.5 w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
           )}
-          {status === "done" && (
-            <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          )}
           {status === "error" && (
             <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           )}
-          <span className="flex-1">
-            {message}
-            {status === "done" && (
-              <a href="/" className="ml-3 underline font-semibold hover:no-underline">
-                查看报告 →
-              </a>
-            )}
-          </span>
+          <span className="flex-1">{message}</span>
         </div>
       )}
 

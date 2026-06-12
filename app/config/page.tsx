@@ -29,7 +29,7 @@ export default async function ConfigPage() {
             </p>
           </div>
           <Link
-            href="/"
+            href="/report"
             className="animate-fade-in inline-flex items-center gap-2 text-sm text-stone-300 hover:text-white transition-colors border border-stone-700 hover:border-stone-400 px-4 py-2 rounded-xl"
             style={{ animationDelay: "100ms" }}
           >
