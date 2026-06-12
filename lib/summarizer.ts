@@ -136,18 +136,24 @@ export async function generateDigest(
   if (!toolUse) throw new Error("Claude 未返回结构化结果");
 
   const result = toolUse.input as RawResult;
+  console.log("[summarizer] raw result keys:", Object.keys(result ?? {}));
 
-  const categories: CategoryDigest[] = result.categories.map((cat) => ({
-    category: cat.category,
-    bullets: cat.bullets
-      .slice(0, cfg.maxBulletsPerCategory)
-      .map((b): BulletPoint => ({
-        text: b.text,
-        source: b.source,
-        link: grouped[cat.category]?.[b.articleIndex]?.link ?? "",
-        perspective: b.perspective || undefined,
-      })),
-  }));
+  const rawCategories = Array.isArray(result?.categories) ? result.categories : [];
 
-  return { overview: result.overview, categories };
+  const categories: CategoryDigest[] = rawCategories.map((cat) => {
+    const rawBullets = Array.isArray(cat?.bullets) ? cat.bullets : [];
+    return {
+      category: cat?.category ?? "其他",
+      bullets: rawBullets
+        .slice(0, cfg.maxBulletsPerCategory)
+        .map((b): BulletPoint => ({
+          text: b.text ?? "",
+          source: b.source ?? "",
+          link: grouped[cat.category]?.[b.articleIndex]?.link ?? "",
+          perspective: b.perspective || undefined,
+        })),
+    };
+  });
+
+  return { overview: result?.overview ?? "", categories };
 }
