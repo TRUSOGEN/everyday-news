@@ -180,12 +180,15 @@ export async function generateDigest(
   const tool = buildTool(cfg);
   const model = cfg.model ?? "claude-haiku-4-5";
 
-  // Expected output size drives both max_tokens and the progress estimate
+  // Expected output size drives both max_tokens and the progress estimate.
+  // Chinese output runs ~1 token per character: bullet text + perspective +
+  // JSON keys ≈ 300-650 tokens each. max_tokens is a ceiling, not a target —
+  // a generous value costs nothing if the model finishes early.
   const expectedBullets = Object.values(grouped).reduce(
     (n, arr) => n + Math.min(arr.length, cfg.maxBulletsPerCategory), 0);
   const perBulletTokens =
-    cfg.summaryLength === "brief" ? 120 : cfg.summaryLength === "detailed" ? 400 : 260;
-  const maxTokens = Math.min(8192, 600 + expectedBullets * perBulletTokens);
+    cfg.summaryLength === "brief" ? 300 : cfg.summaryLength === "detailed" ? 700 : 500;
+  const maxTokens = Math.min(16384, 1000 + expectedBullets * perBulletTokens);
   const expectedChars = 400 + expectedBullets *
     (cfg.summaryLength === "brief" ? 200 : cfg.summaryLength === "detailed" ? 620 : 420);
 
@@ -233,7 +236,13 @@ export async function generateDigest(
   const message = await stream.finalMessage();
 
   console.log("[summarizer:B] response stop_reason:", message.stop_reason,
-              "content blocks:", message.content.length);
+              "content blocks:", message.content.length,
+              "output_tokens:", message.usage.output_tokens);
+
+  if (message.stop_reason === "max_tokens") {
+    console.error("[summarizer:B] output truncated at", maxTokens, "tokens");
+    onProgress?.({ type: "step", text: `⚠ 输出在 ${maxTokens} tokens 处被截断，结果可能不完整`, isWarning: true });
+  }
 
   const toolUse = message.content.find(
     (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
@@ -279,5 +288,15 @@ export async function generateDigest(
   });
 
   console.log("[summarizer:D] done, categories:", categories.length);
+
+  // An overview-only digest is useless — fail loudly instead of saving it
+  if (categories.length === 0 || categories.every((c) => c.bullets.length === 0)) {
+    throw new Error(
+      message.stop_reason === "max_tokens"
+        ? "AI 输出被截断导致分类内容丢失，请重试（已自动调大输出上限）"
+        : "AI 未返回任何分类内容，请重试"
+    );
+  }
+
   return { overview: result?.overview ?? "", categories };
 }
