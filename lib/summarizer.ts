@@ -51,9 +51,8 @@ export async function generateDigest(
     .join("\n\n");
 
   const stream = anthropic.messages.stream({
-    model: "claude-opus-4-7",
+    model: "claude-haiku-4-5",
     max_tokens: 4000,
-    thinking: { type: "adaptive" },
     system: SYSTEM_PROMPT,
     messages: [
       {
