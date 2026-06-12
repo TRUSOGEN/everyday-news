@@ -3,15 +3,27 @@ import type { NewsSource, NewsArticle } from "@/types";
 
 const parser = new Parser({ timeout: 12000, headers: { "User-Agent": "EverydayNews/1.0" } });
 
+function isValidUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 async function fetchSource(source: NewsSource): Promise<NewsArticle[]> {
+  if (!isValidUrl(source.rssUrl)) {
+    throw new Error(`无效 RSS URL: "${source.rssUrl}"`);
+  }
   const feed = await parser.parseURL(source.rssUrl);
   return (feed.items ?? []).slice(0, 12).map((item) => ({
-    title: item.title?.trim() ?? "",
-    link: item.link ?? "",
+    title:       item.title?.trim() ?? "",
+    link:        item.link ?? "",
     description: item.contentSnippet?.trim() ?? item.summary?.trim() ?? "",
-    pubDate: item.pubDate ?? new Date().toISOString(),
-    source: source.name,
-    category: source.category,
+    pubDate:     item.pubDate ?? new Date().toISOString(),
+    source:      source.name,
+    category:    source.category,
   }));
 }
 
@@ -29,7 +41,8 @@ export async function fetchAllNews(
       articles.push(...r.value);
     } else {
       const name = enabled[i]?.name ?? "unknown";
-      errors.push(`${name}: ${String(r.reason)}`);
+      const reason = String(r.reason);
+      errors.push(`${name}: ${reason}`);
       console.error(`[fetcher] ${name} 失败:`, r.reason);
     }
   });

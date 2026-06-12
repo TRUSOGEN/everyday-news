@@ -1,10 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { AppConfig, AiConfig, NewsSource, ModelId, SummaryLength, ReportFormat, ReportLanguage } from "@/types";
 
 type Tab = "sources" | "ai" | "schedule" | "advanced";
 type Status = "idle" | "saving" | "generating" | "done" | "error";
+
+interface LogEntry {
+  id: number;
+  text: string;
+  isWarning?: boolean;
+  isError?: boolean;
+}
 
 function genId() {
   return Math.random().toString(36).slice(2, 9);
@@ -106,6 +113,18 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>("sources");
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [overviewText, setOverviewText] = useState("");
+  const logIdRef = useRef(0);
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [logs, overviewText]);
+
+  function addLog(text: string, opts?: { isWarning?: boolean; isError?: boolean }) {
+    setLogs((prev) => [...prev, { id: logIdRef.current++, text, ...opts }]);
+  }
 
   const enabledCount = config.sources.filter((s) => s.enabled).length;
 
@@ -163,32 +182,109 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
   }
 
   async function saveAndGenerate() {
-    setStatus("saving");
-    setMessage("正在保存配置…");
+    setStatus("generating");
+    setLogs([]);
+    setOverviewText("");
+    setMessage("");
     try {
+      addLog("正在保存配置…");
       const saveRes = await fetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       });
       if (!saveRes.ok) throw new Error(await saveRes.text());
-
-      setStatus("generating");
-      setMessage("正在抓取新闻并生成摘要，预计需要 30–60 秒…");
+      addLog("配置已保存，开始生成报告…");
 
       const genRes = await fetch("/api/generate", {
         method: "POST",
         headers: { Authorization: `Bearer ${cronSecret}` },
       });
-      const data = await genRes.json();
-      if (!genRes.ok) throw new Error(data.error ?? "生成失败");
 
-      setStatus("done");
-      setMessage(`生成成功！共处理 ${data.articleCount} 篇文章`);
+      if (!genRes.ok) {
+        const text = await genRes.text();
+        throw new Error(`HTTP ${genRes.status}: ${text}`);
+      }
+      if (!genRes.body) throw new Error("服务器未返回数据流");
+
+      const reader = genRes.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          let ev: Record<string, unknown>;
+          try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (ev.type === "step") {
+            addLog(String(ev.text), { isWarning: Boolean(ev.isWarning) });
+          } else if (ev.type === "overview_delta") {
+            setOverviewText((prev) => prev + String(ev.text));
+          } else if (ev.type === "done") {
+            setStatus("done");
+            setMessage(`共处理 ${ev.articleCount} 篇文章`);
+          } else if (ev.type === "error") {
+            throw new Error(String(ev.message));
+          }
+        }
+      }
     } catch (e) {
       setStatus("error");
       setMessage(`失败：${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  // ── Generating: live terminal log ────────────────────────────────────────
+  if (status === "generating") {
+    return (
+      <div className="animate-fade-in">
+        <div className="rounded-2xl border border-stone-200 bg-white overflow-hidden mb-4">
+          {/* Header */}
+          <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-stone-100 bg-stone-50">
+            <span className="w-3 h-3 border-2 border-stone-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <span className="text-sm font-semibold text-stone-700">正在生成报告…</span>
+            <span className="ml-auto text-xs text-stone-400">预计 30–60 秒</span>
+          </div>
+
+          {/* Log lines */}
+          <div className="px-5 py-4 space-y-2 max-h-64 overflow-y-auto font-mono text-[13px]">
+            {logs.map((log) => (
+              <div
+                key={log.id}
+                className={`flex items-start gap-2.5 animate-fade-in ${
+                  log.isError ? "text-red-500" : log.isWarning ? "text-amber-600" : "text-stone-600"
+                }`}
+              >
+                <span className="flex-shrink-0 select-none mt-px">
+                  {log.isError ? "✗" : log.isWarning ? "⚠" : "✓"}
+                </span>
+                <span className="leading-snug">{log.text}</span>
+              </div>
+            ))}
+
+            {/* Streaming overview */}
+            {overviewText && (
+              <div className="mt-3 pt-3 border-t border-stone-100 font-sans">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-stone-400 mb-2">
+                  AI 概览生成中
+                </p>
+                <p className="text-stone-700 text-sm leading-relaxed">
+                  {overviewText}
+                  <span className="inline-block w-0.5 h-[1em] bg-stone-400 animate-pulse ml-0.5 align-text-bottom" />
+                </p>
+              </div>
+            )}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // ── After generation: go to report ──────────────────────────────────────
@@ -227,7 +323,7 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
     );
   }
 
-  const isWorking = status === "saving" || status === "generating";
+  const isWorking = status === "saving";
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -603,23 +699,12 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
         )}
       </div>
 
-      {/* Status message (error / in-progress only — "done" is handled by the early return above) */}
-      {message && (
-        <div
-          className={`mb-5 px-5 py-4 rounded-xl text-sm flex items-start gap-3 animate-fade-in ${
-            status === "error"
-              ? "bg-red-50 text-red-700 border border-red-200"
-              : "bg-blue-50 text-blue-700 border border-blue-200"
-          }`}
-        >
-          {status === "generating" && (
-            <span className="mt-0.5 w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-          )}
-          {status === "error" && (
-            <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          )}
+      {/* Error message */}
+      {status === "error" && message && (
+        <div className="mb-5 px-5 py-4 rounded-xl text-sm flex items-start gap-3 animate-fade-in bg-red-50 text-red-700 border border-red-200">
+          <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
           <span className="flex-1">{message}</span>
         </div>
       )}
@@ -641,7 +726,7 @@ export default function ConfigEditor({ initialConfig, cronSecret }: Props) {
           {isWorking ? (
             <>
               <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              {status === "saving" ? "保存中…" : "正在生成报告…"}
+              保存中…
             </>
           ) : (
             <>
