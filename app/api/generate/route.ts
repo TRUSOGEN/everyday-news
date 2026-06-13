@@ -1,7 +1,8 @@
-import { getConfig, saveDigest } from "@/lib/storage";
+import { getConfig, getLatestDigest, getSeenArticleIds, markArticlesSeen, saveDigest } from "@/lib/storage";
 import { fetchAllNews } from "@/lib/fetcher";
 import { generateDigest } from "@/lib/summarizer";
 import { isValidGenerateToken } from "@/lib/auth";
+import { articleIdsFromDigest, createArticleIdentity, filterFreshArticles } from "@/lib/articleIdentity";
 import type { DailyDigest } from "@/types";
 
 export const maxDuration = 90;
@@ -57,19 +58,36 @@ export async function POST(request: Request) {
           return;
         }
 
+        const latestDigest = await getLatestDigest();
+        const seenIds = await getSeenArticleIds(articles.map(createArticleIdentity));
+        for (const id of articleIdsFromDigest(latestDigest)) {
+          seenIds.add(id);
+        }
+        const freshArticles = filterFreshArticles(articles, seenIds);
+
         emit({ type: "progress", value: 25 });
-        emit({ type: "step", text: `共抓取 ${articles.length} 篇文章，准备 AI 分析…` });
+        emit({
+          type: "step",
+          text: `共抓取 ${articles.length} 篇去重文章，其中 ${freshArticles.length} 篇为新文章`,
+        });
         emit({
           type: "articles",
-          items: articles.slice(0, 40).map((a) => ({
+          items: freshArticles.slice(0, 40).map((a) => ({
             title: a.title, link: a.link, source: a.source,
           })),
         });
 
+        if (freshArticles.length === 0) {
+          emit({ type: "progress", value: 100 });
+          emit({ type: "step", text: "没有发现新文章，已跳过 Claude 总结以节省 API 余额" });
+          emit({ type: "done", articleCount: 0, fetchedArticleCount: articles.length, skipped: true });
+          return;
+        }
+
         // ── Step 3: AI summarize (streaming) ──────────────────────────────
         emit({ type: "progress", value: 30 });
         const { overview, categories } = await generateDigest(
-          articles,
+          freshArticles,
           config.ai,
           (event) => emit(event),
         );
@@ -85,13 +103,14 @@ export async function POST(request: Request) {
           generatedAt: now.toISOString(),
           overview,
           categories,
-          totalArticles: articles.length,
-          sources: [...new Set(articles.map((a) => a.source))],
+          totalArticles: freshArticles.length,
+          sources: [...new Set(freshArticles.map((a) => a.source))],
         };
         await saveDigest(digest);
+        await markArticlesSeen(articles);
 
         emit({ type: "progress", value: 100 });
-        emit({ type: "done", articleCount: articles.length, date: digest.date });
+        emit({ type: "done", articleCount: freshArticles.length, fetchedArticleCount: articles.length, date: digest.date });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         const stack = err instanceof Error ? err.stack?.split("\n").slice(0, 4).join(" | ") : "";

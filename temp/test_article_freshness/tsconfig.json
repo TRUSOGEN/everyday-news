@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "../..",
+    "incremental": false,
+    "types": ["node"]
+  },
+  "include": [
+    "article_identity.test.ts",
+    "../../lib/articleIdentity.ts",
+    "../../types/index.ts"
+  ]
+}

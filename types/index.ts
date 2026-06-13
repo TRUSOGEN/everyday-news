@@ -32,6 +32,8 @@ export interface AppConfig {
 }
 
 export interface NewsArticle {
+  id: string;
+  guid?: string;
   title: string;
   link: string;
   description: string;

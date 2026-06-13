@@ -1,5 +1,6 @@
 import Parser from "rss-parser";
 import type { NewsSource, NewsArticle } from "@/types";
+import { dedupeArticles, withArticleIdentity } from "@/lib/articleIdentity";
 
 const parser = new Parser({ timeout: 8000, headers: { "User-Agent": "EverydayNews/1.0" } });
 
@@ -23,7 +24,8 @@ async function fetchSource(source: NewsSource): Promise<NewsArticle[]> {
     throw new Error(`无效 RSS URL: "${source.rssUrl}"`);
   }
   const feed = await parser.parseURL(source.rssUrl);
-  return (feed.items ?? []).slice(0, 12).map((item) => ({
+  const articles = (feed.items ?? []).slice(0, 12).map((item) => withArticleIdentity({
+    guid:        item.guid,
     title:       item.title?.trim() ?? "",
     link:        item.link ?? "",
     description: clip(item.contentSnippet?.trim() ?? item.summary?.trim() ?? ""),
@@ -31,6 +33,7 @@ async function fetchSource(source: NewsSource): Promise<NewsArticle[]> {
     source:      source.name,
     category:    source.category,
   }));
+  return dedupeArticles(articles);
 }
 
 export async function fetchAllNews(
@@ -53,5 +56,5 @@ export async function fetchAllNews(
     }
   });
 
-  return { articles, errors };
+  return { articles: dedupeArticles(articles), errors };
 }

@@ -245,7 +245,11 @@ export default function ConfigEditor({ initialConfig, genToken }: Props) {
             finished = true;
             setProgress(100);
             setStatus("done");
-            setMessage(`共处理 ${ev.articleCount} 篇文章`);
+            if (ev.skipped) {
+              setMessage(`没有发现新文章，已跳过 AI 总结（本次抓取 ${ev.fetchedArticleCount} 篇）`);
+            } else {
+              setMessage(`共处理 ${ev.articleCount} 篇新文章`);
+            }
           } else if (ev.type === "error") {
             throw new Error(String(ev.message));
           }
@@ -744,7 +748,7 @@ export default function ConfigEditor({ initialConfig, genToken }: Props) {
             <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
               <p className="text-xs font-semibold text-amber-700 mb-1">提示</p>
               <p className="text-xs text-amber-600 leading-relaxed">
-                自定义 Prompt 需以"请调用 submit_digest 函数提交结果"结尾，
+                自定义 Prompt 需以{"\""}请调用 submit_digest 函数提交结果{"\""}结尾，
                 否则 AI 可能不返回结构化数据导致生成失败。
               </p>
             </div>

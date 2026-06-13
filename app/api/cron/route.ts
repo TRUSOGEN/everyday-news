@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { getConfig, saveDigest } from "@/lib/storage";
+import { getConfig, getLatestDigest, getSeenArticleIds, markArticlesSeen, saveDigest } from "@/lib/storage";
 import { fetchAllNews } from "@/lib/fetcher";
 import { generateDigest } from "@/lib/summarizer";
+import { articleIdsFromDigest, createArticleIdentity, filterFreshArticles } from "@/lib/articleIdentity";
 import type { DailyDigest } from "@/types";
 
 export async function GET(request: Request) {
@@ -16,7 +17,24 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "所有来源抓取失败", details: errors }, { status: 500 });
   }
 
-  const { overview, categories } = await generateDigest(articles, config.ai);
+  const latestDigest = await getLatestDigest();
+  const seenIds = await getSeenArticleIds(articles.map(createArticleIdentity));
+  for (const id of articleIdsFromDigest(latestDigest)) {
+    seenIds.add(id);
+  }
+  const freshArticles = filterFreshArticles(articles, seenIds);
+
+  if (freshArticles.length === 0) {
+    return NextResponse.json({
+      success: true,
+      skipped: true,
+      reason: "没有发现新文章，已跳过 Claude 总结",
+      fetchedArticleCount: articles.length,
+      articleCount: 0,
+    });
+  }
+
+  const { overview, categories } = await generateDigest(freshArticles, config.ai);
   const now = new Date();
 
   const digest: DailyDigest = {
@@ -24,10 +42,16 @@ export async function GET(request: Request) {
     generatedAt: now.toISOString(),
     overview,
     categories,
-    totalArticles: articles.length,
-    sources: [...new Set(articles.map((a) => a.source))],
+    totalArticles: freshArticles.length,
+    sources: [...new Set(freshArticles.map((a) => a.source))],
   };
 
   await saveDigest(digest);
-  return NextResponse.json({ success: true, date: digest.date, articleCount: articles.length });
+  await markArticlesSeen(articles);
+  return NextResponse.json({
+    success: true,
+    date: digest.date,
+    articleCount: freshArticles.length,
+    fetchedArticleCount: articles.length,
+  });
 }
