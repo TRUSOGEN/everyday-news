@@ -18,8 +18,10 @@ Next.js 16 应用，每天自动抓取 RSS 订阅，用 Anthropic Claude 生成�
 | 样式 | Tailwind v4，`@theme` CSS 变量，Google Fonts（Playfair Display + Inter）|
 | AI | Anthropic SDK `@anthropic-ai/sdk`，Claude Haiku/Sonnet/Opus |
 | 存储 | Upstash Redis `@upstash/redis` |
+| 长期事实库 | Supabase/Postgres + pgvector（schema 已在 `supabase/schema.sql`）|
 | RSS | `rss-parser` |
 | 部署 | Vercel（Serverless + Edge Middleware）|
+| 离线 pipeline | GitHub Actions + Python `scripts/pipeline/` |
 
 ---
 
@@ -68,6 +70,20 @@ lib/
 config/
   defaults.ts           → DEFAULT_CONFIG（sources + ai + schedule）
 
+scripts/
+  pipeline/
+    event_clustering.py → 语义事件聚类核心 Module，输入 embedding 后输出 EventCluster
+    embedding_adapters.py → deterministic dry-run adapter + sentence-transformers lazy adapter
+    pipeline_rows.py    → 把文章、embedding、事件簇转换为 Supabase upsert rows
+    run_daily_pipeline.py → 离线 pipeline CLI，支持 --output 和 --write-supabase
+    supabase_store.py   → Supabase PostgREST 写入 adapter
+
+supabase/
+  schema.sql            → Supabase/Postgres + pgvector 长期事实库 schema
+
+.github/workflows/
+  daily-pipeline.yml    → 每日 UTC 08:00 GitHub Actions dry-run pipeline
+
 middleware.ts           → Edge 中间件，未登录跳 /login；/api/cron、/api/generate 自带 bearer 认证不拦截
 types/index.ts          → 所有共享类型
 ```
@@ -107,6 +123,34 @@ types/index.ts          → 所有共享类型
 - 当前报告页展示轻量条形图式的数据候选；这是可审计指标预览，不是完整统计图表系统。
 - 后续更强的图表能力应基于 `ArticleMetric` 继续扩展为 `ChartSpec`，并要求每个图表数据点都能回溯到 `metric.context`。
 
+### 事件聚类与 Supabase 事实库
+
+- 当前 Redis 仍是运行中短期缓存；Supabase 是下一阶段长期事实库，适合 articles、contents、embeddings、event clusters、metrics、watchlist、全文搜索。
+- `supabase/schema.sql` 定义了 `articles`、`article_contents`、`article_embeddings`、`event_clusters`、`article_event_memberships`、`article_metrics`、`watchlist_terms`、`watchlist_matches`。
+- `scripts/pipeline/event_clustering.py` 提供纯 Python `cluster_articles()` interface，输入已向量化文章，输出 `EventCluster[]`。
+- 第一版聚类实现是单遍 centroid 贪心聚类，阈值默认建议 0.9；后续可在不改调用方 interface 的情况下替换为层次聚类或 HDBSCAN。
+- `scripts/pipeline/embedding_adapters.py` 已提供 sentence-transformers adapter 的懒加载实现；生产环境安装 `requirements-pipeline.txt` 后可使用 `--embedding-adapter sentence-transformers`。
+- `scripts/pipeline/run_daily_pipeline.py` 支持 `--output` 输出 Supabase rows JSON，支持 `--write-supabase` 写入事实库；默认不写库，避免 dry run 误写。
+- `.github/workflows/daily-pipeline.yml` 已建立每日 UTC 08:00 cron 框架，目前执行聚类测试和 fixture dry run。
+- `temp/test_event_clustering/test_pipeline_rows.py` 验证 Supabase rows 结构，并确保测试短向量会补齐成 `vector(384)` 兼容格式。
+
+#### Pipeline CLI 快速参考
+
+```bash
+python3 -m unittest temp.test_event_clustering.test_event_clustering temp.test_event_clustering.test_pipeline_rows -v
+python3 -m scripts.pipeline.run_daily_pipeline \
+  --input temp/test_event_clustering/articles_fixture.json \
+  --similarity-threshold 0.9 \
+  --output temp/test_event_clustering/pipeline_output.json
+```
+
+生产入库前置条件：
+
+- 在 Supabase SQL editor 执行 `supabase/schema.sql`，确保 `pgvector` 可用。
+- 在 GitHub Actions secrets 配置 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`。
+- 安装 `requirements-pipeline.txt` 后使用 `--embedding-adapter sentence-transformers`。
+- dry run 输出检查无误后再启用 `--write-supabase`。
+
 ### AI 生成逻辑（`lib/summarizer.ts`）
 - `anthropic.messages.stream()` + `strict: true` tool schema（categories 类型由 API 强制）
 - 流式 `input_json_delta` 累积，`extractPartialOverview()` 实时解析 overview 文字
@@ -137,6 +181,20 @@ types/index.ts          → 所有共享类型
 | `digest:dates` | List | 最近 30 天日期，lpush+lrem 去重 |
 | `articles:seen` | Set | 已抓取过的稳定 article id，用于跳过重复 Claude 总结 |
 | `article:content:<id>` | String (JSON, 30d TTL) | 正文证据、指标候选、抓取状态 |
+
+## Supabase 表设计
+
+| Table | 内容 |
+|---|---|
+| `news_sources` | 新闻来源配置 |
+| `articles` | 文章元数据 |
+| `article_contents` | 正文、摘录、FTS search vector |
+| `article_embeddings` | pgvector embedding |
+| `event_clusters` | 事件簇 |
+| `article_event_memberships` | 文章到事件簇的归属关系 |
+| `article_metrics` | 可审计数字指标 |
+| `watchlist_terms` | 关键词告警配置 |
+| `watchlist_matches` | 命中的文章-关键词关系 |
 
 ---
 

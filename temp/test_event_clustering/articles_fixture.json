@@ -1,0 +1,23 @@
+[
+  {
+    "id": "bbc-1",
+    "source": "BBC",
+    "title": "Joby reports progress on eVTOL certification",
+    "content_text": "Joby Aviation said its eVTOL certification programme reached a new milestone.",
+    "embedding": [1.0, 0.0, 0.0]
+  },
+  {
+    "id": "reuters-1",
+    "source": "Reuters",
+    "title": "Joby advances air taxi certification work",
+    "content_text": "Joby Aviation advanced certification work for its electric air taxi.",
+    "embedding": [0.98, 0.05, 0.0]
+  },
+  {
+    "id": "bbc-2",
+    "source": "BBC",
+    "title": "Chipmaker revenue rises",
+    "content_text": "A chipmaker reported stronger revenue from AI accelerator demand.",
+    "embedding": [0.0, 1.0, 0.0]
+  }
+]

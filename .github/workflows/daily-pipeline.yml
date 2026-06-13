@@ -1,0 +1,28 @@
+name: Daily News Pipeline
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run pipeline dry check
+        run: |
+          python -m unittest temp.test_event_clustering.test_event_clustering temp.test_event_clustering.test_pipeline_rows -v
+          python -m scripts.pipeline.run_daily_pipeline \
+            --input temp/test_event_clustering/articles_fixture.json \
+            --similarity-threshold 0.9 \
+            --output temp/test_event_clustering/pipeline_output.json
+
+      # 下一步接入真实抓取后，把 --input 换成 pipeline 产出的文章 JSON。
+      # SUPABASE_URL 和 SUPABASE_SERVICE_ROLE_KEY 应配置在 GitHub Actions secrets。
