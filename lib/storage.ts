@@ -1,5 +1,5 @@
 import { Redis } from "@upstash/redis";
-import type { AppConfig, DailyDigest, NewsArticle } from "@/types";
+import type { AppConfig, ArticleContent, DailyDigest, NewsArticle } from "@/types";
 import { DEFAULT_CONFIG } from "@/config/defaults";
 import { createArticleIdentity } from "@/lib/articleIdentity";
 
@@ -7,6 +7,11 @@ const DIGEST_KEY = "digest:latest";
 const CONFIG_KEY = "app:config";
 const DATES_KEY = "digest:dates";
 const SEEN_ARTICLES_KEY = "articles:seen";
+const ARTICLE_CONTENT_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+function articleContentKey(articleId: string): string {
+  return `article:content:${articleId}`;
+}
 
 function getRedis(): Redis | null {
   const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL ?? "";
@@ -66,6 +71,18 @@ export async function markArticlesSeen(articles: NewsArticle[]): Promise<void> {
   if (!redis || ids.length === 0) return;
   const [firstId, ...restIds] = ids;
   await redis.sadd(SEEN_ARTICLES_KEY, firstId, ...restIds);
+}
+
+export async function getArticleContent(articleId: string): Promise<ArticleContent | null> {
+  const redis = getRedis();
+  if (!redis || !articleId) return null;
+  return redis.get<ArticleContent>(articleContentKey(articleId));
+}
+
+export async function saveArticleContent(content: ArticleContent): Promise<void> {
+  const redis = getRedis();
+  if (!redis || !content.articleId) return;
+  await redis.set(articleContentKey(content.articleId), content, { ex: ARTICLE_CONTENT_TTL_SECONDS });
 }
 
 export async function getLatestDigest(): Promise<DailyDigest | null> {

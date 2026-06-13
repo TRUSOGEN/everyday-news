@@ -26,6 +26,24 @@ const FORMAT_GUIDE: Record<string, string> = {
   paragraphs: "叙述性语句，行文连贯自然",
 };
 
+function clipForPrompt(text: string, max = 2400): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function formatArticleForPrompt(article: NewsArticle, index: number): string {
+  const evidence = article.contentText || article.contentExcerpt || article.description;
+  const metricLines = (article.metrics ?? [])
+    .slice(0, 6)
+    .map((metric) => `${metric.rawText}（${metric.context}）`)
+    .join("；");
+
+  return [
+    `[${index}] ${article.title} (${article.source})`,
+    evidence ? `原文证据: ${clipForPrompt(evidence)}` : "",
+    metricLines ? `数据候选: ${metricLines}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 function buildSystemPrompt(cfg: AiConfig): string {
   const lengthGuide = SUMMARY_LENGTH_GUIDE[cfg.summaryLength] ?? SUMMARY_LENGTH_GUIDE.standard;
   const overviewGuide = OVERVIEW_GUIDE[cfg.summaryLength] ?? OVERVIEW_GUIDE.standard;
@@ -36,13 +54,14 @@ function buildSystemPrompt(cfg: AiConfig): string {
   return `你是一位资深财经科技新闻编辑。
 
 规则：
-1. 只基于用户提供的文章内容提炼，不添加原文没有的信息
+1. 只基于用户提供的文章内容和原文证据提炼，不添加原文没有的信息
 2. ${lengthGuide}
 3. ${overviewGuide}，语言流畅，有全局视野
 4. 每个分类挑选最重要的新闻（每分类最多 ${cfg.maxBulletsPerCategory} 条），articleIndex 必须使用该分类列表中标注的数字索引
 5. ${LANGUAGE_GUIDE[cfg.language] ?? LANGUAGE_GUIDE.zh}；${FORMAT_GUIDE[cfg.format] ?? FORMAT_GUIDE.bullets}
 ${perspectiveGuide}
-7. categories 字段必须是 JSON 数组，每个元素含 category 和 bullets
+7. 优先使用“原文证据”和“数据候选”中的事实、数字、时间和实体；如果没有原文证据，则退回 RSS 摘要
+8. categories 字段必须是 JSON 数组，每个元素含 category 和 bullets
 
 请调用 submit_digest 函数提交结果。`;
 }
@@ -186,8 +205,8 @@ export async function generateDigest(
   const inputText = Object.entries(grouped)
     .map(([cat, items]) => {
       const lines = items
-        .map((a, i) => `[${i}] ${a.title}${a.description ? ` — ${a.description}` : ""} (${a.source})`)
-        .join("\n");
+        .map((a, i) => formatArticleForPrompt(a, i))
+        .join("\n\n");
       return `## ${cat}\n${lines}`;
     })
     .join("\n\n");
@@ -292,18 +311,23 @@ export async function generateDigest(
       .slice(0, cfg.maxBulletsPerCategory)
       .map((b): BulletPoint => {
         const idx = typeof b?.articleIndex === "number" ? b.articleIndex : 0;
+        const sourceArticle =
+          catArticles[idx] ||
+          catArticles.find((a) => a.source === b?.source) ||
+          articles.find((a) => a.source === b?.source);
         // Index lookup first; fall back to same-source article so the
         // 查看原文 button never disappears
         const link =
-          catArticles[idx]?.link ||
-          catArticles.find((a) => a.source === b?.source)?.link ||
-          articles.find((a) => a.source === b?.source)?.link ||
+          sourceArticle?.link ||
           "";
         return {
           text:        b?.text ?? "",
           source:      b?.source ?? "",
           link,
           perspective: b?.perspective || undefined,
+          articleId:   sourceArticle?.id,
+          evidenceExcerpt: sourceArticle?.contentExcerpt,
+          metrics:     sourceArticle?.metrics?.slice(0, 6),
         };
       });
 

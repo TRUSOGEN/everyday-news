@@ -40,6 +40,32 @@ export interface NewsArticle {
   pubDate: string;
   source: string;
   category: string;
+  contentText?: string;
+  contentExcerpt?: string;
+  contentStatus?: ArticleContentStatus;
+  metrics?: ArticleMetric[];
+}
+
+export type ArticleContentStatus = "ok" | "empty" | "unsupported" | "failed";
+
+export interface ArticleMetric {
+  kind: "percent" | "money" | "number";
+  rawText: string;
+  value?: number;
+  unit?: string;
+  context: string;
+}
+
+export interface ArticleContent {
+  articleId: string;
+  url: string;
+  title: string;
+  text: string;
+  excerpt: string;
+  status: ArticleContentStatus;
+  metrics: ArticleMetric[];
+  fetchedAt: string;
+  error?: string;
 }
 
 export interface BulletPoint {
@@ -47,6 +73,9 @@ export interface BulletPoint {
   source: string;
   link: string;
   perspective?: string;
+  articleId?: string;
+  evidenceExcerpt?: string;
+  metrics?: ArticleMetric[];
 }
 
 export interface CategoryDigest {

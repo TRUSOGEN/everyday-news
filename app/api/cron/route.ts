@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
-import { getConfig, getLatestDigest, getSeenArticleIds, markArticlesSeen, saveDigest } from "@/lib/storage";
+import {
+  getArticleContent,
+  getConfig,
+  getLatestDigest,
+  getSeenArticleIds,
+  markArticlesSeen,
+  saveArticleContent,
+  saveDigest,
+} from "@/lib/storage";
 import { fetchAllNews } from "@/lib/fetcher";
 import { generateDigest } from "@/lib/summarizer";
 import { articleIdsFromDigest, createArticleIdentity, filterFreshArticles } from "@/lib/articleIdentity";
+import { attachContentToArticle, fetchArticleContent } from "@/lib/articleContent";
 import type { DailyDigest } from "@/types";
 
 export async function GET(request: Request) {
@@ -34,7 +43,16 @@ export async function GET(request: Request) {
     });
   }
 
-  const { overview, categories } = await generateDigest(freshArticles, config.ai);
+  const enrichedArticles = await Promise.all(freshArticles.map(async (article) => {
+    const cached = await getArticleContent(article.id);
+    if (cached) return attachContentToArticle(article, cached);
+
+    const content = await fetchArticleContent(article);
+    await saveArticleContent(content);
+    return attachContentToArticle(article, content);
+  }));
+
+  const { overview, categories } = await generateDigest(enrichedArticles, config.ai);
   const now = new Date();
 
   const digest: DailyDigest = {
@@ -42,8 +60,8 @@ export async function GET(request: Request) {
     generatedAt: now.toISOString(),
     overview,
     categories,
-    totalArticles: freshArticles.length,
-    sources: [...new Set(freshArticles.map((a) => a.source))],
+    totalArticles: enrichedArticles.length,
+    sources: [...new Set(enrichedArticles.map((a) => a.source))],
   };
 
   await saveDigest(digest);
@@ -51,7 +69,8 @@ export async function GET(request: Request) {
   return NextResponse.json({
     success: true,
     date: digest.date,
-    articleCount: freshArticles.length,
+    articleCount: enrichedArticles.length,
     fetchedArticleCount: articles.length,
+    contentArticleCount: enrichedArticles.filter((a) => a.contentStatus === "ok").length,
   });
 }

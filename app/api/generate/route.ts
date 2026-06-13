@@ -1,8 +1,17 @@
-import { getConfig, getLatestDigest, getSeenArticleIds, markArticlesSeen, saveDigest } from "@/lib/storage";
+import {
+  getArticleContent,
+  getConfig,
+  getLatestDigest,
+  getSeenArticleIds,
+  markArticlesSeen,
+  saveArticleContent,
+  saveDigest,
+} from "@/lib/storage";
 import { fetchAllNews } from "@/lib/fetcher";
 import { generateDigest } from "@/lib/summarizer";
 import { isValidGenerateToken } from "@/lib/auth";
 import { articleIdsFromDigest, createArticleIdentity, filterFreshArticles } from "@/lib/articleIdentity";
+import { attachContentToArticle, fetchArticleContent } from "@/lib/articleContent";
 import type { DailyDigest } from "@/types";
 
 export const maxDuration = 90;
@@ -84,10 +93,26 @@ export async function POST(request: Request) {
           return;
         }
 
+        emit({ type: "step", text: "正在抓取新文章原文并提取证据摘录…" });
+        const enrichedArticles = await Promise.all(freshArticles.map(async (article) => {
+          const cached = await getArticleContent(article.id);
+          if (cached) return attachContentToArticle(article, cached);
+
+          const content = await fetchArticleContent(article);
+          await saveArticleContent(content);
+          return attachContentToArticle(article, content);
+        }));
+        const contentOkCount = enrichedArticles.filter((a) => a.contentStatus === "ok").length;
+        emit({
+          type: "step",
+          text: `原文证据提取完成：${contentOkCount}/${enrichedArticles.length} 篇可用`,
+          isWarning: contentOkCount < enrichedArticles.length,
+        });
+
         // ── Step 3: AI summarize (streaming) ──────────────────────────────
         emit({ type: "progress", value: 30 });
         const { overview, categories } = await generateDigest(
-          freshArticles,
+          enrichedArticles,
           config.ai,
           (event) => emit(event),
         );
@@ -103,8 +128,8 @@ export async function POST(request: Request) {
           generatedAt: now.toISOString(),
           overview,
           categories,
-          totalArticles: freshArticles.length,
-          sources: [...new Set(freshArticles.map((a) => a.source))],
+          totalArticles: enrichedArticles.length,
+          sources: [...new Set(enrichedArticles.map((a) => a.source))],
         };
         await saveDigest(digest);
         await markArticlesSeen(articles);

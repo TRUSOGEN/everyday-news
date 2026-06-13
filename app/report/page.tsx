@@ -34,6 +34,11 @@ function formatTime(iso: string) {
   });
 }
 
+function metricBarWidth(value: number | undefined) {
+  if (!value || !Number.isFinite(value)) return "18%";
+  return `${Math.max(18, Math.min(100, Math.round(Math.log10(value + 1) * 24)))}%`;
+}
+
 interface Props {
   searchParams: Promise<{ date?: string }>;
 }
@@ -181,6 +186,50 @@ export default async function ReportPage({ searchParams }: Props) {
                               <p className="text-stone-500 text-[13px] leading-relaxed italic">
                                 {bullet.perspective}
                               </p>
+                            </div>
+                          )}
+
+                          {/* Evidence excerpt */}
+                          {bullet.evidenceExcerpt && (
+                            <div className="mt-4 pt-4 border-t border-stone-100">
+                              <p className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-2">
+                                原文证据
+                              </p>
+                              <p className="text-stone-600 text-[13px] leading-relaxed">
+                                {bullet.evidenceExcerpt}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Metric candidates */}
+                          {bullet.metrics && bullet.metrics.length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-stone-100">
+                              <p className="text-[11px] font-semibold text-blue-600 uppercase tracking-wider mb-3">
+                                数据候选
+                              </p>
+                              <div className="space-y-3">
+                                {bullet.metrics.slice(0, 4).map((metric, metricIdx) => (
+                                  <div key={`${metric.rawText}-${metricIdx}`}>
+                                    <div className="flex items-center justify-between gap-3 mb-1">
+                                      <span className="text-xs font-semibold text-stone-700">
+                                        {metric.rawText}
+                                      </span>
+                                      <span className="text-[10px] uppercase tracking-wide text-stone-400">
+                                        {metric.kind}
+                                      </span>
+                                    </div>
+                                    <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full rounded-full bg-blue-400"
+                                        style={{ width: metricBarWidth(metric.value) }}
+                                      />
+                                    </div>
+                                    <p className="text-[11px] text-stone-400 leading-relaxed mt-1">
+                                      {metric.context}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
 

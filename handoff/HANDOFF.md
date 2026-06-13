@@ -61,8 +61,9 @@ lib/
   auth.ts               → 每日轮换 token（HMAC-SHA256），CRON_SECRET 不暴露给浏览器
   fetcher.ts            → RSS 抓取，URL 预验证，描述截断到 200 字
   articleIdentity.ts    → 稳定 article id、URL 规范化、去重、新鲜文章过滤
+  articleContent.ts     → 公开 HTML 正文抓取、正文证据摘录、数字指标候选提取
   summarizer.ts         → 调用 Claude（stream），提取 overview delta，strict tool schema
-  storage.ts            → Redis CRUD（getConfig/saveConfig/getLatestDigest/saveDigest/getDigestDates/getSeenArticleIds/markArticlesSeen）
+  storage.ts            → Redis CRUD（配置、报告、已见文章、正文内容缓存）
 
 config/
   defaults.ts           → DEFAULT_CONFIG（sources + ai + schedule）
@@ -80,9 +81,10 @@ types/index.ts          → 所有共享类型
 2. 点「保存并立即生成」→ POST `/api/config` 保存配置
 3. 前端用 fetch SSE 连接 `/api/generate`（bearer = 每日 HMAC token）
 4. 服务端先抓 RSS 并按 article id 去重，再过滤 Redis 中已见文章；没有新文章时直接 emit `done(skipped: true)`，不调用 Claude
-5. 有新文章时，ReadableStream 逐步 emit 事件：`step` / `progress` / `articles` / `overview_delta` / `done` / `error`
-6. 前端实时显示：进度条（0→100%）+ 步骤日志 + AI 概览逐字流入 + 新文章原文链接
-7. `done` 事件 → 跳转成功页 → 点「查看今日报告」到 `/report`
+5. 有新文章时先抓取公开 HTML，提取正文证据摘录和数字指标候选，并缓存到 Redis
+6. ReadableStream 逐步 emit 事件：`step` / `progress` / `articles` / `overview_delta` / `done` / `error`
+7. 前端实时显示：进度条（0→100%）+ 步骤日志 + AI 概览逐字流入 + 新文章原文链接
+8. `done` 事件 → 跳转成功页 → 点「查看今日报告」到 `/report`
 
 ### 定时生成（Vercel Cron）
 - `vercel.json` 配置每天 04:00 UTC（北京时间 12:00）触发 `/api/cron`
@@ -95,6 +97,15 @@ types/index.ts          → 所有共享类型
 - URL 规范化会移除 `utm_*`、`fbclid`、`gclid`、`mc_cid` 等 tracking 参数，并排序 query 参数。
 - 生成前使用 `dedupeArticles()` 合并同一轮 RSS 重复项，再用 Redis `articles:seen` 和最近报告链接过滤旧文章。
 - Claude 只总结 `freshArticles`；保存报告成功后，`markArticlesSeen(articles)` 会把本轮抓到的去重文章整体标记为已见。
+
+### 正文证据与数据候选
+
+- `lib/articleContent.ts` 只处理公开 HTML，不绕过登录、paywall 或反爬限制。
+- 抽取优先级：`<article>` → `<main>` → `<body>`；会移除 script/style/nav/header/footer/aside/form 等非正文区域。
+- 正文最多保留 8000 字符，报告证据摘录最多约 900 字符，Claude prompt 中单篇证据再截断，避免 token 爆炸。
+- 指标候选由规则抽取，包括金额、百分比、percentage points、million/billion/trillion units/users 等数量表达，并保留原文上下文。
+- 当前报告页展示轻量条形图式的数据候选；这是可审计指标预览，不是完整统计图表系统。
+- 后续更强的图表能力应基于 `ArticleMetric` 继续扩展为 `ChartSpec`，并要求每个图表数据点都能回溯到 `metric.context`。
 
 ### AI 生成逻辑（`lib/summarizer.ts`）
 - `anthropic.messages.stream()` + `strict: true` tool schema（categories 类型由 API 强制）
@@ -125,6 +136,7 @@ types/index.ts          → 所有共享类型
 | `digest:YYYY-MM-DD` | String (JSON) | 历史报告 |
 | `digest:dates` | List | 最近 30 天日期，lpush+lrem 去重 |
 | `articles:seen` | Set | 已抓取过的稳定 article id，用于跳过重复 Claude 总结 |
+| `article:content:<id>` | String (JSON, 30d TTL) | 正文证据、指标候选、抓取状态 |
 
 ---
 
@@ -150,6 +162,7 @@ types/index.ts          → 所有共享类型
 | 报告格式/语言配置不生效 | prompt 里没有用这两个字段 | 加入 `LANGUAGE_GUIDE` / `FORMAT_GUIDE` |
 | 流中断时前端卡死在"生成中" | 断流后 reader 结束但没有 done/error 事件 | 加 `finished` 守卫，断流时提示用户重试 |
 | 每次生成都总结同一批 RSS 文章 | 每次固定取 feed 前 12 条，缺少 article-level 去重和 seen 状态 | 新增 `articleIdentity.ts`、Redis `articles:seen`，无新文章时跳过 Claude |
+| RSS 摘要信息量不足，无法支撑可靠分析和图表 | 只把标题和短摘要交给 Claude | 新增正文证据层，报告保存原文摘录和指标候选 |
 
 ---
 
